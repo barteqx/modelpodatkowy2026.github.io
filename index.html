@@ -85,6 +85,57 @@
         const fmtB = (n) => (n / 1e9).toFixed(0) + ' mld';
         const fmtP = (n) => n?.toFixed(1) + '%';
 
+        // Kompresja linku - klucze ustawień w ustalonej kolejności
+        const SETTINGS_KEYS = ['pkbTril', 'workersMln', 'avgSalary', 'consumptionBase', 'pensionersMln', 'minWage', 'pensionTopUpPerc', 'pitRate', 'citRate', 'vatRate', 'belkaRate', 'revTaxRate', 'wealthRate', 'wealthRevenue', 'effPit', 'effCit', 'effVat', 'expHealth', 'expEdu', 'expInfra', 'expDef', 'expAdmin', 'expOther'];
+        const CITIZEN_KEYS = ['gross', 'form', 'rycRate', 'costs', 'isUnder26', 'kupPercent', 'vatExp5', 'vatExp8', 'vatExp23', 'assets'];
+        const COMPANY_KEYS = ['wage', 'revenue', 'costs', 'payroll', 'isForeign', 'citTypeCurr', 'citTypeProp'];
+
+        // Prosta kompresja RLE-like dla powtarzających się znaków
+        const miniCompress = (str) => {
+            let result = '';
+            let i = 0;
+            while (i < str.length) {
+                let char = str[i];
+                let count = 1;
+                while (i + count < str.length && str[i + count] === char && count < 9) count++;
+                result += count > 2 ? count + char : str.substr(i, count);
+                i += count;
+            }
+            return result;
+        };
+
+        const miniDecompress = (str) => {
+            return str.replace(/(\d)(.)/g, (_, n, c) => c.repeat(parseInt(n)));
+        };
+
+        const compressState = (settings, citizenState, companyState) => {
+            // Tylko wartości które różnią się od domyślnych
+            const diff = {};
+            SETTINGS_KEYS.forEach((k, i) => {
+                if (settings[k] !== DEFAULT_SETTINGS[k]) diff[i] = settings[k];
+            });
+            const cVals = CITIZEN_KEYS.map(k => citizenState[k] ?? '');
+            const coVals = COMPANY_KEYS.map(k => companyState[k] ?? '');
+            const data = [diff, cVals, coVals];
+            const json = JSON.stringify(data);
+            const b64 = btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            return miniCompress(b64);
+        };
+
+        const decompressState = (str) => {
+            try {
+                const b64 = miniDecompress(str).replace(/-/g, '+').replace(/_/g, '/');
+                const data = JSON.parse(atob(b64));
+                const settings = { ...DEFAULT_SETTINGS };
+                Object.entries(data[0]).forEach(([i, v]) => { settings[SETTINGS_KEYS[i]] = v; });
+                const citizen = {};
+                CITIZEN_KEYS.forEach((k, i) => { if (data[1][i] !== '') citizen[k] = data[1][i]; });
+                const company = {};
+                COMPANY_KEYS.forEach((k, i) => { if (data[2][i] !== '') company[k] = data[2][i]; });
+                return { settings, citizen, company };
+            } catch { return null; }
+        };
+
         // === GŁÓWNY KOMPONENT ===
         function App() {
             // Inicjalizacja z localStorage i URL hash
@@ -96,11 +147,11 @@
 
             const getInitialSettings = () => {
                 try {
-                    // Najpierw sprawdź parametry URL
+                    // Najpierw sprawdź skompresowane parametry URL
                     const params = new URLSearchParams(window.location.search);
-                    if (params.has('s')) {
-                        const urlSettings = JSON.parse(decodeURIComponent(params.get('s')));
-                        return { ...DEFAULT_SETTINGS, ...urlSettings };
+                    if (params.has('d')) {
+                        const decoded = decompressState(params.get('d'));
+                        if (decoded) return { ...DEFAULT_SETTINGS, ...decoded.settings };
                     }
                     // Potem localStorage
                     const saved = localStorage.getItem('taxModelSettings');
@@ -111,8 +162,9 @@
             const getInitialCalcState = () => {
                 try {
                     const params = new URLSearchParams(window.location.search);
-                    if (params.has('c')) {
-                        return JSON.parse(decodeURIComponent(params.get('c')));
+                    if (params.has('d')) {
+                        const decoded = decompressState(params.get('d'));
+                        if (decoded) return { citizen: decoded.citizen, company: decoded.company };
                     }
                     return null;
                 } catch { return null; }
@@ -1499,14 +1551,8 @@
                 const citizenState = JSON.parse(localStorage.getItem('taxModelCitizen') || '{}');
                 const companyState = JSON.parse(localStorage.getItem('taxModelCompany') || '{}');
 
-                const params = new URLSearchParams();
-                params.set('s', encodeURIComponent(JSON.stringify(s)));
-                params.set('c', encodeURIComponent(JSON.stringify({
-                    citizen: citizenState,
-                    company: companyState
-                })));
-
-                return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+                const compressed = compressState(s, citizenState, companyState);
+                return `${window.location.origin}${window.location.pathname}?d=${compressed}`;
             };
 
             const copyLink = () => {
