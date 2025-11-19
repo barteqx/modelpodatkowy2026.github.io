@@ -87,19 +87,83 @@
 
         // === GŁÓWNY KOMPONENT ===
         function App() {
-            const [activeTab, setActiveTab] = useState('info');
-            const [s, setS] = useState(DEFAULT_SETTINGS);
-            const [darkMode, setDarkMode] = useState(false);
+            // Inicjalizacja z localStorage i URL hash
+            const getInitialTab = () => {
+                const hash = window.location.hash.slice(1);
+                const validTabs = ['info', 'citizen', 'company', 'charts', 'budget', 'settings'];
+                return validTabs.includes(hash) ? hash : 'info';
+            };
 
+            const getInitialSettings = () => {
+                try {
+                    // Najpierw sprawdź parametry URL
+                    const params = new URLSearchParams(window.location.search);
+                    if (params.has('s')) {
+                        const urlSettings = JSON.parse(decodeURIComponent(params.get('s')));
+                        return { ...DEFAULT_SETTINGS, ...urlSettings };
+                    }
+                    // Potem localStorage
+                    const saved = localStorage.getItem('taxModelSettings');
+                    return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+                } catch { return DEFAULT_SETTINGS; }
+            };
+
+            const getInitialCalcState = () => {
+                try {
+                    const params = new URLSearchParams(window.location.search);
+                    if (params.has('c')) {
+                        return JSON.parse(decodeURIComponent(params.get('c')));
+                    }
+                    return null;
+                } catch { return null; }
+            };
+
+            const initialCalcState = getInitialCalcState();
+
+            const getInitialDarkMode = () => {
+                try {
+                    const saved = localStorage.getItem('taxModelDarkMode');
+                    if (saved !== null) return JSON.parse(saved);
+                    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                } catch { return false; }
+            };
+
+            const [activeTab, setActiveTab] = useState(getInitialTab);
+            const [s, setS] = useState(getInitialSettings);
+            const [darkMode, setDarkMode] = useState(getInitialDarkMode);
+
+            // Synchronizacja z URL hash
             useEffect(() => {
-                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) setDarkMode(true);
+                const handleHashChange = () => {
+                    const hash = window.location.hash.slice(1);
+                    const validTabs = ['info', 'citizen', 'company', 'charts', 'budget', 'settings'];
+                    if (validTabs.includes(hash)) setActiveTab(hash);
+                };
+                window.addEventListener('hashchange', handleHashChange);
+                return () => window.removeEventListener('hashchange', handleHashChange);
             }, []);
 
+            // Aktualizacja URL hash przy zmianie karty
+            const changeTab = (tabId) => {
+                setActiveTab(tabId);
+                window.location.hash = tabId;
+            };
+
+            // Zapisywanie ustawień do localStorage
             useEffect(() => {
+                try {
+                    localStorage.setItem('taxModelSettings', JSON.stringify(s));
+                } catch {}
+            }, [s]);
+
+            // Zapisywanie dark mode do localStorage
+            useEffect(() => {
+                try {
+                    localStorage.setItem('taxModelDarkMode', JSON.stringify(darkMode));
+                } catch {}
                 if (darkMode) document.documentElement.classList.add('dark');
                 else document.documentElement.classList.remove('dark');
             }, [darkMode]);
-
 
             const updateS = (key, val) => setS(prev => ({ ...prev, [key]: parseFloat(val) || 0 }));
 
@@ -147,7 +211,7 @@
             }, [s]);
 
             const TabBtn = ({ id, label, icon }) => (
-                <button onClick={() => setActiveTab(id)}
+                <button onClick={() => changeTab(id)}
                     className={`flex items-center gap-2 px-4 py-3 font-bold border-b-2 text-sm uppercase tracking-wide transition-colors
                         ${activeTab === id
                             ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20'
@@ -177,14 +241,16 @@
                             <TabBtn id="info" label="Start / Założenia" icon="home" />
                             <TabBtn id="citizen" label="Obywatel" icon="info" />
                             <TabBtn id="company" label="Firma" icon="building-2" />
+                            <TabBtn id="charts" label="Wykresy" icon="bar-chart-3" />
                             <TabBtn id="budget" label="Budżet" icon="calculator" />
                             <TabBtn id="settings" label="Ustawienia" icon="settings" />
                         </nav>
 
                         <div className="animate-in">
-                            {activeTab === 'info' && <InfoTab s={s} taxFree={budget.taxFree} changeTab={setActiveTab} />}
-                            {activeTab === 'citizen' && <CitizenTab s={s} budget={budget} />}
-                            {activeTab === 'company' && <CompanyTab s={s} />}
+                            {activeTab === 'info' && <InfoTab s={s} taxFree={budget.taxFree} changeTab={changeTab} />}
+                            {activeTab === 'citizen' && <CitizenTab s={s} budget={budget} initialCalcState={initialCalcState?.citizen} />}
+                            {activeTab === 'company' && <CompanyTab s={s} initialCalcState={initialCalcState?.company} />}
+                            {activeTab === 'charts' && <ChartsTab s={s} budget={budget} />}
                             {activeTab === 'budget' && <BudgetTab s={s} b={budget} />}
                             {activeTab === 'settings' && <SettingsTab s={s} updateS={updateS} reset={() => setS(DEFAULT_SETTINGS)} />}
                         </div>
@@ -206,7 +272,7 @@
                         <InfoCard title="PIT" color="indigo" icon="user" items={[
                             `Stawka: ${s.pitRate}%`,
                             `Kwota wolna: ${fmt(taxFree)}`,
-                            `Belka: ${s.belkaRate}%`,
+                            `Wszystkie dochody sumowane`,
                             `Brak ZUS/NFZ`,
                             `Brak ulg i odliczeń`
                         ]} />
@@ -219,7 +285,9 @@
 
                         <InfoCard title="CIT" color="cyan" icon="building-2" items={[
                             `Standard: ${s.citRate}%`,
-                            `Estoński: 0%`
+                            `Estoński: 0% (do 25 mln przychodu)`,
+                            `Estoński: brak wypłat dywidend`,
+                            `Estoński: reinwestycja zysków`
                         ]} />
 
                         <InfoCard title="Podatek Zagraniczny" color="rose" icon="globe" items={[
@@ -238,9 +306,9 @@
                         ]} />
 
                         <InfoCard title="Akcyza" color="red" icon="cigarette" items={[
-                            `Alkohol: +20%`,
-                            `Wyroby tytoniowe: +20%`,
-                            `Paliwa: bez zmian`,
+                            `Alkohol: +20% (ok. 55% ceny)`,
+                            `Tytoń: +20% (ok. 85% ceny)`,
+                            `Paliwa: bez zmian (~50%)`,
                             `Energia: bez zmian`
                         ]} />
 
@@ -249,6 +317,21 @@
                             `Brak 2% od kupna nieruchomości`,
                             `Brak 1% od pożyczek`,
                             `Uproszczenie transakcji`
+                        ]} />
+
+                        <InfoCard title="Brak Podatku od Spadków" color="green" icon="gift" items={[
+                            `Likwidacja podatku od spadków`,
+                            `Likwidacja podatku od darowizn`,
+                            `Rolę przejmuje podatek majątkowy`,
+                            `Uproszczenie sukcesji`
+                        ]} />
+
+                        <InfoCard title="Nagrody i Wygrane" color="purple" icon="trophy" items={[
+                            `Gry losowe: zwykły PIT`,
+                            `Teleturnieje: zwykły PIT`,
+                            `Konkursy: zwykły PIT`,
+                            `Sumowane z innymi dochodami`,
+                            `Brak ryczałtu 10%`
                         ]} />
                     </div>
 
@@ -275,6 +358,14 @@
                             `Likwidacja NFZ`,
                             `Uproszczenie administracji`,
                             `Niższe koszty państwa`
+                        ]} />
+
+                        <InfoCard title="Cyfryzacja i Automatyzacja" color="cyan" icon="cpu" items={[
+                            `Pełna automatyzacja rozliczeń`,
+                            `E-faktury i e-paragony`,
+                            `Automatyczne obliczanie podatków`,
+                            `Brak zeznań rocznych`,
+                            `AI w kontrolach skarbowych`
                         ]} />
 
                         <InfoCard title="Likwidacja Ulg i Transferów" color="red" icon="scissors" items={[
@@ -388,24 +479,44 @@
             );
         }
 
-        function CitizenTab({ s, budget }) {
-            const [gross, setGross] = useState(s.avgSalary * 12);
-            const [form, setForm] = useState('UOP');
-            const [rycRate, setRycRate] = useState(0.15);
-            const [costs, setCosts] = useState(20000);
+        function CitizenTab({ s, budget, initialCalcState }) {
+            // Ładowanie z localStorage lub URL
+            const loadCitizenState = () => {
+                try {
+                    if (initialCalcState) return initialCalcState;
+                    const saved = localStorage.getItem('taxModelCitizen');
+                    return saved ? JSON.parse(saved) : null;
+                } catch { return null; }
+            };
+
+            const initialState = loadCitizenState();
+
+            const [gross, setGross] = useState(initialState?.gross ?? s.avgSalary * 12);
+            const [form, setForm] = useState(initialState?.form ?? 'UOP');
+            const [rycRate, setRycRate] = useState(initialState?.rycRate ?? 0.15);
+            const [costs, setCosts] = useState(initialState?.costs ?? 20000);
             // Wydatki rozbite na kategorie VAT (miesięcznie, netto)
-            const [vatExp5, setVatExp5] = useState(1500);   // żywność, leki
-            const [vatExp8, setVatExp8] = useState(500);    // usługi, gastronomia
-            const [vatExp23, setVatExp23] = useState(1500); // elektronika, paliwo, inne
+            const [vatExp5, setVatExp5] = useState(initialState?.vatExp5 ?? 1500);   // żywność, leki
+            const [vatExp8, setVatExp8] = useState(initialState?.vatExp8 ?? 500);    // usługi, gastronomia
+            const [vatExp23, setVatExp23] = useState(initialState?.vatExp23 ?? 1500); // elektronika, paliwo, inne
 
             // Podatek majątkowy - nieruchomości
-            const [properties, setProperties] = useState([]);
+            const [properties, setProperties] = useState(initialState?.properties ?? []);
             const [newPropName, setNewPropName] = useState('');
             const [newPropValue, setNewPropValue] = useState(500000);
             const [newPropDate, setNewPropDate] = useState('2024-01-01');
 
             // Podatek majątkowy - aktywa (poza IKE, IKZE, PPK)
-            const [assets, setAssets] = useState(0);
+            const [assets, setAssets] = useState(initialState?.assets ?? 0);
+
+            // Zapisywanie do localStorage
+            useEffect(() => {
+                try {
+                    localStorage.setItem('taxModelCitizen', JSON.stringify({
+                        gross, form, rycRate, costs, vatExp5, vatExp8, vatExp23, properties, assets
+                    }));
+                } catch {}
+            }, [gross, form, rycRate, costs, vatExp5, vatExp8, vatExp23, properties, assets]);
 
             const addProperty = () => {
                 if (newPropName && newPropValue > 0) {
@@ -457,7 +568,7 @@
 
             const r = useMemo(() => {
                 const baseProp = (form === 'UOP') ? gross : Math.max(0, gross - costs);
-                const taxProp = Math.max(0, baseProp - budget.taxFree) * (s.pitRate / 100);
+                const taxProp = Math.max(0, Math.max(0, baseProp - budget.taxFree) * (s.pitRate / 100));
                 const netProp = baseProp - taxProp;
 
                 let netCurr = 0;
@@ -597,25 +708,27 @@
                             </div>
 
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-3 text-center">
-                                Suma: {fmt(r.vatTotal)}/mies. | Rocznie: {fmt(r.costOldTotal)} → {fmt(r.costNewTotal)}
+                                Suma wydatków netto: {fmt(r.vatTotal)}/mies.
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 text-center mb-4">
+                                <div className="p-3 rounded border bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600">
+                                    <div className="text-xs font-bold uppercase opacity-60 mb-1">Obecnie (5/8/23%)</div>
+                                    <div className="text-lg font-bold dark:text-gray-200">{fmt(r.costOldTotal)}</div>
+                                    <div className="text-xs opacity-70">rocznie</div>
+                                </div>
+                                <div className="p-3 rounded border bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800">
+                                    <div className={`text-xs font-bold uppercase opacity-60 mb-1 ${CLS.accent}`}>Propozycja ({s.vatRate}%)</div>
+                                    <div className={`text-lg font-bold ${CLS.accent}`}>{fmt(r.costNewTotal)}</div>
+                                    <div className="text-xs opacity-70">rocznie</div>
+                                </div>
                             </div>
 
                             <div className={`text-center p-3 rounded font-bold ${r.vatLoss >= 0 ? 'bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 text-red-600 dark:text-red-400' : 'bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800 text-green-600 dark:text-green-400'}`}>
-                                {r.vatLoss >= 0 ? 'Wzrost' : 'Spadek'} kosztów rocznie: {r.vatLoss >= 0 ? '+' : ''}{fmt(r.vatLoss)}
+                                {r.vatLoss >= 0 ? 'Wzrost' : 'Spadek'} kosztów: {r.vatLoss >= 0 ? '+' : ''}{fmt(r.vatLoss)}
                             </div>
                         </div>
 
-                        <div className="bg-gray-900 dark:bg-black p-6 rounded-xl shadow-xl text-white border border-gray-700">
-                            <h4 className="text-xs uppercase tracking-widest text-gray-400 mb-3 text-center">Twój Bilans Roczny</h4>
-                            <div className={`text-4xl font-black text-center mb-4 ${finalBalance >= 0 ? 'text-green-400' : 'text-red-500'}`}>
-                                {finalBalance > 0 ? '+' : ''}{fmt(finalBalance)}
-                            </div>
-                            <div className="space-y-1 text-xs">
-                                <div className="flex justify-between"><span className="text-gray-400">Zysk z PIT:</span><span className={r.diffNet >= 0 ? 'text-green-400' : 'text-red-400'}>{r.diffNet > 0 ? '+' : ''}{fmt(r.diffNet)}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-400">Zmiana VAT:</span><span className={r.vatLoss <= 0 ? 'text-green-400' : 'text-red-400'}>{r.vatLoss > 0 ? '-' : '+'}{fmt(Math.abs(r.vatLoss))}</span></div>
-                                <div className="flex justify-between"><span className="text-gray-400">Podatek majątkowy:</span><span className={wealthCalc.totalTax === 0 ? 'text-green-400' : 'text-red-400'}>{wealthCalc.totalTax > 0 ? '-' : ''}{fmt(wealthCalc.totalTax)}</span></div>
-                            </div>
-                        </div>
                     </div>
                     </div>
 
@@ -693,14 +806,58 @@
             );
         }
 
-        function CompanyTab({ s }) {
-            const [wage, setWage] = useState(120000);
-            const [revenue, setRevenue] = useState(5000000);
-            const [costs, setCosts] = useState(3000000);
-            const [payroll, setPayroll] = useState(1000000);
-            const [isForeign, setIsForeign] = useState(false);
-            const [citTypeCurr, setCitTypeCurr] = useState('duzy');
-            const [citTypeProp, setCitTypeProp] = useState('standard');
+        function CompanyTab({ s, initialCalcState }) {
+            // Ładowanie z localStorage lub URL
+            const loadCompanyState = () => {
+                try {
+                    if (initialCalcState) return initialCalcState;
+                    const saved = localStorage.getItem('taxModelCompany');
+                    return saved ? JSON.parse(saved) : null;
+                } catch { return null; }
+            };
+
+            const initialState = loadCompanyState();
+
+            const [wage, setWage] = useState(initialState?.wage ?? 120000);
+            const [revenue, setRevenue] = useState(initialState?.revenue ?? 5000000);
+            const [costs, setCosts] = useState(initialState?.costs ?? 3000000);
+            const [payroll, setPayroll] = useState(initialState?.payroll ?? 1000000);
+            const [isForeign, setIsForeign] = useState(initialState?.isForeign ?? false);
+            const [citTypeCurr, setCitTypeCurr] = useState(initialState?.citTypeCurr ?? 'duzy');
+            const [citTypeProp, setCitTypeProp] = useState(initialState?.citTypeProp ?? 'standard');
+
+            // Nieruchomości nieprodukcyjne
+            const [nonprodProperties, setNonprodProperties] = useState(initialState?.nonprodProperties ?? []);
+            const [newNonprodName, setNewNonprodName] = useState('');
+            const [newNonprodValue, setNewNonprodValue] = useState(1000000);
+
+            // Zapisywanie do localStorage
+            useEffect(() => {
+                try {
+                    localStorage.setItem('taxModelCompany', JSON.stringify({
+                        wage, revenue, costs, payroll, isForeign, citTypeCurr, citTypeProp, nonprodProperties
+                    }));
+                } catch {}
+            }, [wage, revenue, costs, payroll, isForeign, citTypeCurr, citTypeProp, nonprodProperties]);
+
+            const addNonprodProperty = () => {
+                if (newNonprodName && newNonprodValue > 0) {
+                    setNonprodProperties([...nonprodProperties, {
+                        id: Date.now(),
+                        name: newNonprodName,
+                        value: newNonprodValue
+                    }]);
+                    setNewNonprodName('');
+                    setNewNonprodValue(1000000);
+                }
+            };
+
+            const removeNonprodProperty = (id) => {
+                setNonprodProperties(nonprodProperties.filter(p => p.id !== id));
+            };
+
+            // Automatyczne przełączenie na standard gdy przychód > 25mln
+            const effectiveCitType = revenue > 25000000 ? 'standard' : citTypeProp;
 
             const ckp = useMemo(() => ({
                 curr: wage * (1 + C.ZUS_EMPLOYER),
@@ -708,72 +865,460 @@
                 save: (wage * (1 + C.ZUS_EMPLOYER)) - wage
             }), [wage]);
 
+            // Podatek od nieruchomości nieprodukcyjnych
+            const nonprodTax = useMemo(() => {
+                const totalValue = nonprodProperties.reduce((sum, p) => sum + p.value, 0);
+                const tax = totalValue * (s.wealthRate / 100);
+                return { totalValue, tax };
+            }, [nonprodProperties, s.wealthRate]);
+
             const prof = useMemo(() => {
                 const incCurr = revenue - costs - payroll;
-                const taxC = Math.max(0, incCurr) * (citTypeCurr === 'maly' ? 0.09 : 0.19);
+                const taxC = Math.max(0, Math.max(0, incCurr) * (citTypeCurr === 'maly' ? 0.09 : 0.19));
 
                 const payrollProp = payroll / (1 + C.ZUS_EMPLOYER);
+                const payrollSavings = payroll - payrollProp;
                 const incProp = revenue - costs - payrollProp;
                 let taxP = 0;
-                if(citTypeProp === 'standard') {
+                if(effectiveCitType === 'standard') {
                     const cit = Math.max(0, incProp) * (s.citRate/100);
-                    const rev = isForeign ? (revenue * s.revTaxRate/100) : 0;
-                    taxP = Math.max(cit, rev);
+                    const rev = isForeign ? Math.max(0, revenue * s.revTaxRate/100) : 0;
+                    taxP = Math.max(0, Math.max(cit, rev));
                 }
                 return {
                     profCurr: incCurr - taxC, taxCurr: taxC,
                     profProp: incProp - taxP, taxProp: taxP,
-                    diff: (incProp - taxP) - (incCurr - taxC)
+                    diff: (incProp - taxP) - (incCurr - taxC),
+                    payrollProp, payrollSavings
                 }
-            }, [revenue, costs, payroll, isForeign, citTypeCurr, citTypeProp, s]);
+            }, [revenue, costs, payroll, isForeign, citTypeCurr, effectiveCitType, s]);
+
+            // Bilans firmy
+            const finalBalance = prof.diff - nonprodTax.tax;
 
             return (
-                <div className="grid lg:grid-cols-2 gap-8 animate-in">
-                     <div className={CLS.card}>
-                        <h3 className={CLS.h3}>Kalkulator CKP (Rocznie)</h3>
-                        <div className="mb-6">
-                            <div className="flex justify-between mb-2">
-                               <label className={CLS.label}>Płaca Brutto Pracownika</label>
-                               <span className={`${CLS.accent} font-bold`}>{fmt(wage)}</span>
-                            </div>
-                            <input type="range" min="40000" max="1000000" step="5000" value={wage} onChange={e=>setWage(Number(e.target.value))} className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+                <div className="space-y-8 animate-in">
+                    <div className="bg-gray-900 dark:bg-black p-6 rounded-xl shadow-xl text-white border border-gray-700">
+                        <h4 className="text-xs uppercase tracking-widest text-gray-400 mb-3 text-center">Bilans Firmy Roczny</h4>
+                        <div className={`text-4xl font-black text-center mb-4 ${finalBalance >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                            {finalBalance > 0 ? '+' : ''}{fmt(finalBalance)}
                         </div>
-                        <div className="space-y-4 text-sm">
-                            <div className="flex justify-between p-3 bg-gray-100 dark:bg-gray-700 rounded"><span>Obecny CKP (+ZUS):</span><span className="font-bold dark:text-gray-200">{fmt(ckp.curr)}</span></div>
-                            <div className="flex justify-between p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded border border-indigo-200 dark:border-indigo-800"><span className={`${CLS.accent} font-bold`}>Nowy CKP (Bez ZUS):</span><span className={`${CLS.accent} font-bold`}>{fmt(ckp.prop)}</span></div>
-                            <div className={`text-center font-bold mt-2 ${CLS.success}`}>Oszczędność roczna: {fmt(ckp.save)}</div>
+                        <div className="grid grid-cols-2 gap-4 text-xs text-center">
+                            <div><span className="text-gray-400 block">Różnica zysku netto</span><span className={prof.diff >= 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{prof.diff > 0 ? '+' : ''}{fmt(prof.diff)}</span></div>
+                            <div><span className="text-gray-400 block">Podatek majątkowy</span><span className={nonprodTax.tax === 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>{nonprodTax.tax > 0 ? '-' : ''}{fmt(nonprodTax.tax)}</span></div>
                         </div>
-                     </div>
+                    </div>
 
-                     <div className={CLS.card}>
-                        <h3 className={CLS.h3}>Kalkulator Zysku Netto</h3>
-                        <div className="grid grid-cols-2 gap-4 text-sm mb-6">
-                            <div><label className={CLS.label}>Przychód</label><input type="number" value={revenue} onChange={e=>setRevenue(Number(e.target.value))} className={CLS.input}/></div>
-                            <div><label className={CLS.label}>Koszty Op.</label><input type="number" value={costs} onChange={e=>setCosts(Number(e.target.value))} className={CLS.input}/></div>
-                            <div className="col-span-2"><label className={CLS.label}>Obecny Fundusz Płac (CKP)</label><input type="number" value={payroll} onChange={e=>setPayroll(Number(e.target.value))} className={CLS.input}/></div>
-                        </div>
-                        <div className="mb-6 flex items-center gap-2 text-sm dark:text-gray-300">
-                            <input type="checkbox" checked={isForeign} onChange={e=>setIsForeign(e.target.checked)} className="accent-indigo-600 w-5 h-5" />
-                            <label>Kapitał Zagraniczny (Min. {s.revTaxRate}%)</label>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-center">
-                            <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded">
-                                <div className="text-xs uppercase font-bold opacity-70 mb-2">Obecnie</div>
-                                <select value={citTypeCurr} onChange={e=>setCitTypeCurr(e.target.value)} className={`${CLS.select} text-xs mb-2 py-1`}><option value="duzy">Duży 19%</option><option value="maly">Mały 9%</option></select>
-                                <div className={`text-xs ${CLS.danger}`}>Podatek: {fmt(prof.taxCurr)}</div>
-                                <div className="font-bold text-lg dark:text-gray-200">{fmt(prof.profCurr)}</div>
+                    <div className="grid lg:grid-cols-2 gap-8">
+                         <div className={CLS.card}>
+                            <h3 className={CLS.h3}>1. Kalkulator CKP (Rocznie)</h3>
+                            <div className="mb-6">
+                                <div className="flex justify-between mb-2">
+                                   <label className={CLS.label}>Płaca Brutto Pracownika</label>
+                                   <span className={`${CLS.accent} font-bold`}>{fmt(wage)}</span>
+                                </div>
+                                <input type="range" min="40000" max="1000000" step="5000" value={wage} onChange={e=>setWage(Number(e.target.value))} className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
                             </div>
-                            <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded border border-indigo-200 dark:border-indigo-800">
-                                <div className={`text-xs uppercase font-bold opacity-70 mb-2 ${CLS.accent}`}>Propozycja</div>
-                                <select value={citTypeProp} onChange={e=>setCitTypeProp(e.target.value)} className={`${CLS.select} text-xs mb-2 py-1`}><option value="standard">Standard {s.citRate}%</option><option value="estonski">Estoński 0%</option></select>
-                                <div className={`text-xs ${CLS.danger}`}>Podatek: {fmt(prof.taxProp)}</div>
-                                <div className={`font-bold text-lg ${CLS.accent}`}>{fmt(prof.profProp)}</div>
+                            <div className="space-y-4 text-sm">
+                                <div className="flex justify-between p-3 bg-gray-100 dark:bg-gray-700 rounded"><span>Obecny CKP (+ZUS):</span><span className="font-bold dark:text-gray-200">{fmt(ckp.curr)}</span></div>
+                                <div className="flex justify-between p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded border border-indigo-200 dark:border-indigo-800"><span className={`${CLS.accent} font-bold`}>Nowy CKP (Bez ZUS):</span><span className={`${CLS.accent} font-bold`}>{fmt(ckp.prop)}</span></div>
+                                <div className={`text-center font-bold mt-2 ${CLS.success}`}>Oszczędność roczna: {fmt(ckp.save)}</div>
+                            </div>
+                         </div>
+
+                         <div className={CLS.card}>
+                            <h3 className={CLS.h3}>2. Kalkulator Zysku Netto</h3>
+                            <div className="grid grid-cols-2 gap-4 text-sm mb-6">
+                                <div><label className={CLS.label}>Przychód</label><input type="number" value={revenue} onChange={e=>setRevenue(Number(e.target.value))} className={CLS.input}/></div>
+                                <div><label className={CLS.label}>Koszty Op.</label><input type="number" value={costs} onChange={e=>setCosts(Number(e.target.value))} className={CLS.input}/></div>
+                                <div className="col-span-2"><label className={CLS.label}>Obecny Fundusz Płac (CKP)</label><input type="number" value={payroll} onChange={e=>setPayroll(Number(e.target.value))} className={CLS.input}/></div>
+                            </div>
+                            <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800 text-sm">
+                                <div className="flex justify-between"><span className="text-green-700 dark:text-green-400">Nowy fundusz płac:</span><span className="font-bold text-green-700 dark:text-green-400">{fmt(prof.payrollProp)}</span></div>
+                                <div className="flex justify-between"><span className="text-green-700 dark:text-green-400">Oszczędność na płacach:</span><span className="font-bold text-green-700 dark:text-green-400">-{fmt(prof.payrollSavings)}</span></div>
+                            </div>
+                            <div className="mb-6 flex items-center gap-2 text-sm dark:text-gray-300">
+                                <input type="checkbox" checked={isForeign} onChange={e=>setIsForeign(e.target.checked)} className="accent-indigo-600 w-5 h-5" />
+                                <label>Kapitał Zagraniczny (Min. {s.revTaxRate}%)</label>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4 text-center">
+                                <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded">
+                                    <div className="text-xs uppercase font-bold opacity-70 mb-2">Obecnie</div>
+                                    <select value={citTypeCurr} onChange={e=>setCitTypeCurr(e.target.value)} className={`${CLS.select} text-xs mb-2 py-1`}><option value="duzy">Duży 19%</option><option value="maly">Mały 9%</option></select>
+                                    <div className={`text-xs ${CLS.danger}`}>Podatek: {fmt(prof.taxCurr)}</div>
+                                    <div className="font-bold text-lg dark:text-gray-200">{fmt(prof.profCurr)}</div>
+                                </div>
+                                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded border border-indigo-200 dark:border-indigo-800">
+                                    <div className={`text-xs uppercase font-bold opacity-70 mb-2 ${CLS.accent}`}>Propozycja</div>
+                                    <select value={citTypeProp} onChange={e=>setCitTypeProp(e.target.value)} className={`${CLS.select} text-xs mb-2 py-1`} disabled={revenue > 25000000}>
+                                        <option value="standard">Standard {s.citRate}%</option>
+                                        <option value="estonski">Estoński 0%</option>
+                                    </select>
+                                    {revenue > 25000000 && <div className="text-xs text-amber-500 mb-1">Estoński niedostępny &gt;25mln</div>}
+                                    <div className={`text-xs ${CLS.danger}`}>Podatek: {fmt(prof.taxProp)}</div>
+                                    <div className={`font-bold text-lg ${CLS.accent}`}>{fmt(prof.profProp)}</div>
+                                </div>
+                            </div>
+                            <div className={`text-center mt-4 font-bold text-xl ${prof.diff >= 0 ? CLS.success : CLS.danger}`}>
+                                Różnica: {prof.diff > 0 ? '+' : ''}{fmt(prof.diff)}
+                            </div>
+                         </div>
+                    </div>
+
+                    <h3 className={CLS.h4_section}><Icon name="building" size={20} /> Podatek Majątkowy od Nieruchomości Nieprodukcyjnych</h3>
+                    <div className={CLS.card}>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Nieruchomości niewykorzystywane do produkcji (np. biura, lokale handlowe)</p>
+
+                        <div className="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                            {nonprodProperties.length === 0 && (
+                                <div className="text-center text-gray-500 dark:text-gray-400 text-sm py-4">Brak nieruchomości nieprodukcyjnych</div>
+                            )}
+                            {nonprodProperties.map((p) => (
+                                <div key={p.id} className="flex items-center justify-between p-2 rounded text-sm bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                                    <span className="font-medium">{p.name}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-amber-600 dark:text-amber-400">{fmt(p.value)}</span>
+                                        <button onClick={() => removeNonprodProperty(p.id)} className="text-red-500 hover:text-red-700 text-xs">✕</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="border-t dark:border-gray-700 pt-4 space-y-2">
+                            <div className="grid grid-cols-2 gap-2">
+                                <input type="text" placeholder="Nazwa nieruchomości" value={newNonprodName} onChange={e => setNewNonprodName(e.target.value)} className={CLS.input} />
+                                <input type="number" placeholder="Wartość" value={newNonprodValue} onChange={e => setNewNonprodValue(Number(e.target.value))} className={CLS.input} />
+                            </div>
+                            <button onClick={addNonprodProperty} className="w-full py-2 bg-indigo-600 text-white rounded font-bold text-sm hover:bg-indigo-700 transition">Dodaj nieruchomość</button>
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t dark:border-gray-700 grid grid-cols-3 gap-4 text-sm text-center">
+                            <div><span className="text-gray-500 block">Suma wartości</span><span className="font-bold">{fmt(nonprodTax.totalValue)}</span></div>
+                            <div><span className="text-gray-500 block">Stawka</span><span className="font-bold">{s.wealthRate}%</span></div>
+                            <div><span className="text-gray-500 block">Podatek roczny</span><span className={`font-bold text-lg ${nonprodTax.tax > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600'}`}>{fmt(nonprodTax.tax)}</span></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function ChartsTab({ s, budget }) {
+            const [selectedForms, setSelectedForms] = useState(['UOP', 'LIN', 'RYC', 'PROP']);
+            const [rycRate, setRycRate] = useState(0.15);
+            const [jdgCosts, setJdgCosts] = useState(0); // Koszty uzyskania przychodu dla JDG
+            const [tooltip, setTooltip] = useState(null); // {x, y, data}
+
+            const toggleForm = (form) => {
+                setSelectedForms(prev =>
+                    prev.includes(form)
+                        ? prev.filter(f => f !== form)
+                        : [...prev, form]
+                );
+            };
+
+            // Limit składek emerytalnych - 30-krotność przeciętnego wynagrodzenia (2024: ~234 720 zł)
+            const ZUS_LIMIT = 234720;
+
+            // Obliczenia dla wielu poziomów dochodu (wykres liniowy)
+            const chartData = useMemo(() => {
+                const points = [];
+                for (let gross = 30000; gross <= 1000000; gross += 10000) {
+                    // Nowy system - prosty PIT
+                    const baseProp = gross;
+                    const taxProp = Math.max(0, Math.max(0, baseProp - budget.taxFree) * (s.pitRate / 100));
+                    const netProp = baseProp - taxProp;
+                    const effRateProp = (taxProp / gross) * 100;
+
+                    // UOP - obecny system z limitem składek emerytalnych
+                    // Składki emerytalne i rentowe mają limit, chorobowa i zdrowotna nie
+                    const zusEmRent = Math.min(gross, ZUS_LIMIT) * 0.1116; // emerytalna 9.76% + rentowa 1.5%
+                    const zusChorobowa = gross * 0.0245; // 2.45% bez limitu
+                    const zus = zusEmRent + zusChorobowa;
+                    const base = gross - zus;
+                    const nfz = base * C.NFZ;
+                    const pitBase = Math.max(0, base - 3000);
+                    const pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
+                    const netUOP = gross - zus - nfz - Math.max(0, pit);
+                    const effRateUOP = ((gross - netUOP) / gross) * 100;
+
+                    // Liniowy 19% - obecny (z kosztami uzyskania przychodu)
+                    const incLin = Math.max(0, gross - jdgCosts);
+                    const baseLin = Math.max(0, incLin - C.JDG_ZUS_RYCZALT);
+                    const nfzLin = baseLin * 0.049;
+                    const pitLin = Math.max(0, baseLin - nfzLin) * 0.19;
+                    const netLin = incLin - C.JDG_ZUS_RYCZALT - nfzLin - pitLin;
+                    const effRateLin = ((gross - netLin) / gross) * 100;
+
+                    // Ryczałt - wybrana stawka (z kosztami i 3 stawkami składki zdrowotnej)
+                    const incRyc = Math.max(0, gross - jdgCosts);
+                    const zusRyc = C.JDG_ZUS_RYCZALT;
+                    // Składka zdrowotna dla ryczałtu - 3 progi przychodowe (rocznie)
+                    const nfzRyc = incRyc <= 60000 ? 4800 : (incRyc <= 300000 ? 8000 : 14000);
+                    const pitRyc = incRyc * rycRate;
+                    const netRyc = incRyc - zusRyc - nfzRyc - pitRyc;
+                    const effRateRyc = ((gross - netRyc) / gross) * 100;
+
+                    points.push({
+                        gross,
+                        UOP: effRateUOP,
+                        LIN: effRateLin,
+                        RYC: effRateRyc,
+                        PROP: effRateProp,
+                        netProp, netUOP, netLin, netRyc,
+                        taxUOP: gross - netUOP,
+                        taxLin: gross - netLin,
+                        taxRyc: gross - netRyc,
+                        taxProp
+                    });
+                }
+                return points;
+            }, [s, budget, rycRate, jdgCosts]);
+
+            // Rysowanie wykresu SVG
+            const chartWidth = 800;
+            const chartHeight = 300;
+            const padding = { top: 20, right: 20, bottom: 40, left: 50 };
+            const innerWidth = chartWidth - padding.left - padding.right;
+            const innerHeight = chartHeight - padding.top - padding.bottom;
+
+            const maxGross = 1000000;
+            const maxRate = 60;
+
+            const xScale = (val) => (val / maxGross) * innerWidth;
+            const yScale = (val) => innerHeight - (val / maxRate) * innerHeight;
+
+            const createPath = (key) => {
+                return chartData.map((d, i) =>
+                    `${i === 0 ? 'M' : 'L'} ${xScale(d.gross)} ${yScale(d[key])}`
+                ).join(' ');
+            };
+
+            const handleMouseMove = (e) => {
+                const svg = e.currentTarget;
+                const rect = svg.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Przelicz na współrzędne wykresu
+                const svgX = (x / rect.width) * chartWidth - padding.left;
+                const gross = (svgX / innerWidth) * maxGross;
+
+                // Znajdź najbliższy punkt danych
+                const closest = chartData.reduce((prev, curr) =>
+                    Math.abs(curr.gross - gross) < Math.abs(prev.gross - gross) ? curr : prev
+                );
+
+                if (closest && gross >= 0 && gross <= maxGross) {
+                    setTooltip({ x, y, data: closest });
+                } else {
+                    setTooltip(null);
+                }
+            };
+
+            const handleMouseLeave = () => {
+                setTooltip(null);
+            };
+
+            const formColors = {
+                UOP: '#9ca3af',
+                LIN: '#60a5fa',
+                RYC: '#fbbf24',
+                PROP: '#6366f1'
+            };
+
+            const formLabels = {
+                UOP: 'Umowa o Pracę',
+                LIN: 'Liniowy 19%',
+                RYC: `Ryczałt ${(rycRate * 100).toFixed(0)}%`,
+                PROP: `Propozycja ${s.pitRate}%`
+            };
+
+            return (
+                <div className="space-y-8 animate-in">
+                    <div className={CLS.card}>
+                        <h3 className={CLS.h3}><Icon name="trending-up" size={20} className="inline mr-2" />Efektywne Opodatkowanie wg Przychodu</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Całkowite obciążenie (podatek + składki) jako % przychodu brutto</p>
+
+                        <div className="flex flex-wrap items-center gap-2 mb-6">
+                            {Object.keys(formLabels).map(form => (
+                                <button
+                                    key={form}
+                                    onClick={() => toggleForm(form)}
+                                    className={`px-3 py-1.5 rounded text-sm font-bold transition ${
+                                        selectedForms.includes(form)
+                                            ? 'text-white'
+                                            : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+                                    }`}
+                                    style={selectedForms.includes(form) ? {backgroundColor: formColors[form]} : {}}
+                                >
+                                    {formLabels[form]}
+                                </button>
+                            ))}
+                            <div className="flex items-center gap-1 ml-2">
+                                <label className="text-xs text-gray-500">Stawka ryczałtu:</label>
+                                <select
+                                    value={rycRate}
+                                    onChange={e => setRycRate(Number(e.target.value))}
+                                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                                >
+                                    <option value="0.02">2%</option>
+                                    <option value="0.03">3%</option>
+                                    <option value="0.055">5.5%</option>
+                                    <option value="0.085">8.5%</option>
+                                    <option value="0.10">10%</option>
+                                    <option value="0.12">12%</option>
+                                    <option value="0.14">14%</option>
+                                    <option value="0.15">15%</option>
+                                    <option value="0.17">17%</option>
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-1 ml-2">
+                                <label className="text-xs text-gray-500">Koszty JDG (rocznie):</label>
+                                <input
+                                    type="number"
+                                    value={jdgCosts}
+                                    onChange={e => setJdgCosts(Number(e.target.value))}
+                                    className="text-xs px-2 py-1 w-24 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                                    min="0"
+                                    step="1000"
+                                />
                             </div>
                         </div>
-                        <div className={`text-center mt-4 font-bold text-xl ${prof.diff >= 0 ? CLS.success : CLS.danger}`}>
-                            Różnica: {prof.diff > 0 ? '+' : ''}{fmt(prof.diff)}
+
+                        <div className="overflow-x-auto relative">
+                            <svg
+                                viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                                className="w-full max-w-4xl mx-auto cursor-crosshair"
+                                onMouseMove={handleMouseMove}
+                                onMouseLeave={handleMouseLeave}
+                            >
+                                <g transform={`translate(${padding.left}, ${padding.top})`}>
+                                    {/* Siatka */}
+                                    {[0, 10, 20, 30, 40, 50, 60].map(rate => (
+                                        <g key={rate}>
+                                            <line x1="0" y1={yScale(rate)} x2={innerWidth} y2={yScale(rate)}
+                                                stroke="currentColor" strokeOpacity="0.1" />
+                                            <text x="-10" y={yScale(rate)} dy="4" textAnchor="end"
+                                                className="text-xs fill-gray-500">{rate}%</text>
+                                        </g>
+                                    ))}
+                                    {[0, 200000, 400000, 600000, 800000, 1000000].map(gross => (
+                                        <g key={gross}>
+                                            <line x1={xScale(gross)} y1="0" x2={xScale(gross)} y2={innerHeight}
+                                                stroke="currentColor" strokeOpacity="0.1" />
+                                            <text x={xScale(gross)} y={innerHeight + 20} textAnchor="middle"
+                                                className="text-xs fill-gray-500">{gross >= 1000000 ? (gross/1000000) + 'M' : (gross/1000) + 'k'}</text>
+                                        </g>
+                                    ))}
+
+                                    {/* Linie wykresów */}
+                                    {selectedForms.includes('UOP') && (
+                                        <path d={createPath('UOP')} fill="none" stroke={formColors.UOP} strokeWidth="2" />
+                                    )}
+                                    {selectedForms.includes('LIN') && (
+                                        <path d={createPath('LIN')} fill="none" stroke={formColors.LIN} strokeWidth="2" />
+                                    )}
+                                    {selectedForms.includes('RYC') && (
+                                        <path d={createPath('RYC')} fill="none" stroke={formColors.RYC} strokeWidth="2" />
+                                    )}
+                                    {selectedForms.includes('PROP') && (
+                                        <path d={createPath('PROP')} fill="none" stroke={formColors.PROP} strokeWidth="3" />
+                                    )}
+
+                                    {/* Etykiety osi */}
+                                    <text x={innerWidth / 2} y={innerHeight + 35} textAnchor="middle"
+                                        className="text-xs fill-gray-500 font-medium">Przychód roczny (zł)</text>
+
+                                    {/* Linia wskaźnika przy najechaniu */}
+                                    {tooltip && (
+                                        <line
+                                            x1={xScale(tooltip.data.gross)}
+                                            y1="0"
+                                            x2={xScale(tooltip.data.gross)}
+                                            y2={innerHeight}
+                                            stroke="#6366f1"
+                                            strokeWidth="1"
+                                            strokeDasharray="4"
+                                        />
+                                    )}
+                                </g>
+                            </svg>
+
+                            {/* Tooltip */}
+                            {tooltip && (
+                                <div
+                                    className="absolute bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-3 text-xs pointer-events-none z-10"
+                                    style={{
+                                        left: Math.min(tooltip.x + 10, 300),
+                                        top: Math.max(tooltip.y - 80, 10),
+                                        minWidth: '180px'
+                                    }}
+                                >
+                                    <div className="font-bold text-sm mb-2 border-b pb-1 dark:border-gray-600">
+                                        {fmt(tooltip.data.gross)} przychodu
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        {selectedForms.includes('UOP') && (
+                                            <div>
+                                                <div className="flex justify-between">
+                                                    <span style={{color: formColors.UOP}}>UoP:</span>
+                                                    <span className="font-bold">{tooltip.data.UOP.toFixed(1)}%</span>
+                                                </div>
+                                                <div className="text-gray-500 text-right">
+                                                    Podatek: {fmt(tooltip.data.taxUOP)} | Netto: {fmt(tooltip.data.netUOP)}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedForms.includes('LIN') && (
+                                            <div>
+                                                <div className="flex justify-between">
+                                                    <span style={{color: formColors.LIN}}>Liniowy:</span>
+                                                    <span className="font-bold">{tooltip.data.LIN.toFixed(1)}%</span>
+                                                </div>
+                                                <div className="text-gray-500 text-right">
+                                                    Podatek: {fmt(tooltip.data.taxLin)} | Netto: {fmt(tooltip.data.netLin)}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedForms.includes('RYC') && (
+                                            <div>
+                                                <div className="flex justify-between">
+                                                    <span style={{color: formColors.RYC}}>Ryczałt:</span>
+                                                    <span className="font-bold">{tooltip.data.RYC.toFixed(1)}%</span>
+                                                </div>
+                                                <div className="text-gray-500 text-right">
+                                                    Podatek: {fmt(tooltip.data.taxRyc)} | Netto: {fmt(tooltip.data.netRyc)}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedForms.includes('PROP') && (
+                                            <div>
+                                                <div className="flex justify-between">
+                                                    <span style={{color: formColors.PROP}}>Propozycja:</span>
+                                                    <span className="font-bold">{tooltip.data.PROP.toFixed(1)}%</span>
+                                                </div>
+                                                <div className="text-gray-500 text-right">
+                                                    Podatek: {fmt(tooltip.data.taxProp)} | Netto: {fmt(tooltip.data.netProp)}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                     </div>
+
+                        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            {selectedForms.map(form => {
+                                const lastPoint = chartData[chartData.length - 1];
+                                return (
+                                    <div key={form} className="text-center p-2 rounded" style={{backgroundColor: `${formColors[form]}20`}}>
+                                        <div className="font-bold" style={{color: formColors[form]}}>{formLabels[form]}</div>
+                                        <div className="text-xs text-gray-500">przy 1M: {lastPoint[form].toFixed(1)}%</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
                 </div>
             );
         }
@@ -860,12 +1405,57 @@
         }
 
         function SettingsTab({ s, updateS, reset }) {
+            const [copied, setCopied] = useState(false);
+
+            const generateShareLink = () => {
+                const citizenState = JSON.parse(localStorage.getItem('taxModelCitizen') || '{}');
+                const companyState = JSON.parse(localStorage.getItem('taxModelCompany') || '{}');
+
+                const params = new URLSearchParams();
+                params.set('s', encodeURIComponent(JSON.stringify(s)));
+                params.set('c', encodeURIComponent(JSON.stringify({
+                    citizen: citizenState,
+                    company: companyState
+                })));
+
+                return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+            };
+
+            const copyLink = () => {
+                const link = generateShareLink();
+                navigator.clipboard.writeText(link).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                });
+            };
+
             return (
-                <div className={`${CLS.card} animate-in`}>
-                    <div className="flex justify-between items-center mb-8 border-b dark:border-gray-700 pb-4">
-                        <h2 className={`${CLS.h3} mb-0`}>Panel Sterowania</h2>
-                        <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 font-bold">Przywróć Domyślne</button>
+                <div className="space-y-6 animate-in">
+                    <div className={CLS.card}>
+                        <h3 className={CLS.h3}><Icon name="share-2" size={20} className="inline mr-2" />Udostępnij Konfigurację</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Link zawiera wszystkie ustawienia i wartości kalkulatorów</p>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                readOnly
+                                value={generateShareLink()}
+                                className={`${CLS.input} flex-1 text-xs`}
+                                onClick={e => e.target.select()}
+                            />
+                            <button
+                                onClick={copyLink}
+                                className={`px-4 py-2 rounded font-bold text-sm transition ${copied ? 'bg-green-500 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                            >
+                                {copied ? 'Skopiowano!' : 'Kopiuj'}
+                            </button>
+                        </div>
                     </div>
+
+                    <div className={CLS.card}>
+                        <div className="flex justify-between items-center mb-8 border-b dark:border-gray-700 pb-4">
+                            <h2 className={`${CLS.h3} mb-0`}>Panel Sterowania</h2>
+                            <button onClick={reset} className="text-sm text-red-500 hover:text-red-700 font-bold">Przywróć Domyślne</button>
+                        </div>
 
                     <div className="grid md:grid-cols-2 gap-12">
                         <div className="space-y-8">
@@ -912,6 +1502,7 @@
                                 <p className="text-xs text-gray-500 mt-2">Od majątku {'>'} 5 mln zł i od 3. mieszkania</p>
                             </section>
                         </div>
+                    </div>
                     </div>
                 </div>
             );
