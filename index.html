@@ -495,6 +495,7 @@
             const [form, setForm] = useState(initialState?.form ?? 'UOP');
             const [rycRate, setRycRate] = useState(initialState?.rycRate ?? 0.15);
             const [costs, setCosts] = useState(initialState?.costs ?? 20000);
+            const [isUnder26, setIsUnder26] = useState(initialState?.isUnder26 ?? false); // Zwolnienie do 26 r.ż.
             // Wydatki rozbite na kategorie VAT (miesięcznie, netto)
             const [vatExp5, setVatExp5] = useState(initialState?.vatExp5 ?? 1500);   // żywność, leki
             const [vatExp8, setVatExp8] = useState(initialState?.vatExp8 ?? 500);    // usługi, gastronomia
@@ -513,10 +514,10 @@
             useEffect(() => {
                 try {
                     localStorage.setItem('taxModelCitizen', JSON.stringify({
-                        gross, form, rycRate, costs, vatExp5, vatExp8, vatExp23, properties, assets
+                        gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, properties, assets
                     }));
                 } catch {}
-            }, [gross, form, rycRate, costs, vatExp5, vatExp8, vatExp23, properties, assets]);
+            }, [gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, properties, assets]);
 
             const addProperty = () => {
                 if (newPropName && newPropValue > 0) {
@@ -572,12 +573,26 @@
                 const netProp = baseProp - taxProp;
 
                 let netCurr = 0;
+                // Limit składek emerytalnych - 30-krotność przeciętnego wynagrodzenia (2024: ~234 720 zł)
+                const ZUS_LIMIT = 234720;
                 if(form === 'UOP') {
-                    const zus = gross * C.ZUS_EMPLOYEE;
+                    // Składki emerytalne i rentowe mają limit, chorobowa nie
+                    const zusEmRent = Math.min(gross, ZUS_LIMIT) * 0.1116; // emerytalna 9.76% + rentowa 1.5%
+                    const zusChorobowa = gross * 0.0245; // 2.45% bez limitu
+                    const zus = zusEmRent + zusChorobowa;
                     const base = gross - zus;
                     const nfz = base * C.NFZ;
-                    const pitBase = Math.max(0, base - 3000);
-                    const pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
+
+                    // Zwolnienie z PIT do 26 r.ż. (limit 85 528 zł)
+                    let pit = 0;
+                    if (isUnder26) {
+                        const taxableBase = Math.max(0, base - 85528);
+                        const pitBase = Math.max(0, taxableBase - 3000);
+                        pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
+                    } else {
+                        const pitBase = Math.max(0, base - 3000);
+                        pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
+                    }
                     netCurr = gross - zus - nfz - Math.max(0, pit);
                 } else if (form === 'LIN') {
                     const base = Math.max(0, gross - costs - C.JDG_ZUS_RYCZALT);
@@ -609,7 +624,7 @@
                     costOldTotal,
                     costNewTotal
                 };
-            }, [gross, form, rycRate, costs, vatExp5, vatExp8, vatExp23, s, budget]);
+            }, [gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, s, budget]);
 
             // Całkowity bilans z uwzględnieniem podatku majątkowego
             const finalBalance = r.diffNet - r.vatLoss - wealthCalc.totalTax;
@@ -658,6 +673,12 @@
                             </div>
                             {form === 'RYC' && <div><label className={CLS.label}>Stawka</label><select value={rycRate} onChange={e=>setRycRate(Number(e.target.value))} className={CLS.select}><option value="0.02">2%</option><option value="0.03">3%</option><option value="0.055">5.5%</option><option value="0.085">8.5%</option><option value="0.10">10%</option><option value="0.12">12%</option><option value="0.14">14%</option><option value="0.15">15%</option><option value="0.17">17%</option></select></div>}
                             {form !== 'UOP' && <div className="col-span-2"><label className={CLS.label}>Koszty</label><input type="number" value={costs} onChange={e=>setCosts(Number(e.target.value))} className={CLS.input}/></div>}
+                            {form === 'UOP' && (
+                                <div className="col-span-2 flex items-center gap-2">
+                                    <input type="checkbox" id="under26" checked={isUnder26} onChange={e=>setIsUnder26(e.target.checked)} className="accent-indigo-600 w-4 h-4" />
+                                    <label htmlFor="under26" className="text-sm dark:text-gray-300">Zwolnienie do 26 r.ż. (limit 85 528 zł)</label>
+                                </div>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-2 gap-4 text-center">
@@ -1003,7 +1024,7 @@
         }
 
         function ChartsTab({ s, budget }) {
-            const [selectedForms, setSelectedForms] = useState(['UOP', 'LIN', 'RYC', 'PROP']);
+            const [selectedForms, setSelectedForms] = useState(['UOP', 'UOP26', 'LIN', 'RYC', 'PROP']);
             const [rycRate, setRycRate] = useState(0.15);
             const [jdgCosts, setJdgCosts] = useState(0); // Koszty uzyskania przychodu dla JDG
             const [tooltip, setTooltip] = useState(null); // {x, y, data}
@@ -1041,6 +1062,13 @@
                     const netUOP = gross - zus - nfz - Math.max(0, pit);
                     const effRateUOP = ((gross - netUOP) / gross) * 100;
 
+                    // UOP do 26 r.ż. - zwolnienie z PIT do 85 528 zł
+                    const taxableBase26 = Math.max(0, base - 85528);
+                    const pitBase26 = Math.max(0, taxableBase26 - 3000);
+                    const pit26 = (pitBase26 <= C.PIT_THRESH) ? (pitBase26 * C.PIT_R1 - 3600) : (10800 + (pitBase26 - C.PIT_THRESH) * C.PIT_R2);
+                    const netUOP26 = gross - zus - nfz - Math.max(0, pit26);
+                    const effRateUOP26 = ((gross - netUOP26) / gross) * 100;
+
                     // Liniowy 19% - obecny (z kosztami uzyskania przychodu)
                     const incLin = Math.max(0, gross - jdgCosts);
                     const baseLin = Math.max(0, incLin - C.JDG_ZUS_RYCZALT);
@@ -1061,11 +1089,13 @@
                     points.push({
                         gross,
                         UOP: effRateUOP,
+                        UOP26: effRateUOP26,
                         LIN: effRateLin,
                         RYC: effRateRyc,
                         PROP: effRateProp,
-                        netProp, netUOP, netLin, netRyc,
+                        netProp, netUOP, netUOP26, netLin, netRyc,
                         taxUOP: gross - netUOP,
+                        taxUOP26: gross - netUOP26,
                         taxLin: gross - netLin,
                         taxRyc: gross - netRyc,
                         taxProp
@@ -1121,6 +1151,7 @@
 
             const formColors = {
                 UOP: '#9ca3af',
+                UOP26: '#22c55e',
                 LIN: '#60a5fa',
                 RYC: '#fbbf24',
                 PROP: '#6366f1'
@@ -1128,6 +1159,7 @@
 
             const formLabels = {
                 UOP: 'Umowa o Pracę',
+                UOP26: 'UoP do 26 r.ż.',
                 LIN: 'Liniowy 19%',
                 RYC: `Ryczałt ${(rycRate * 100).toFixed(0)}%`,
                 PROP: `Propozycja ${s.pitRate}%`
@@ -1215,6 +1247,9 @@
                                     {selectedForms.includes('UOP') && (
                                         <path d={createPath('UOP')} fill="none" stroke={formColors.UOP} strokeWidth="2" />
                                     )}
+                                    {selectedForms.includes('UOP26') && (
+                                        <path d={createPath('UOP26')} fill="none" stroke={formColors.UOP26} strokeWidth="2" />
+                                    )}
                                     {selectedForms.includes('LIN') && (
                                         <path d={createPath('LIN')} fill="none" stroke={formColors.LIN} strokeWidth="2" />
                                     )}
@@ -1266,6 +1301,17 @@
                                                 </div>
                                                 <div className="text-gray-500 text-right">
                                                     Podatek: {fmt(tooltip.data.taxUOP)} | Netto: {fmt(tooltip.data.netUOP)}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {selectedForms.includes('UOP26') && (
+                                            <div>
+                                                <div className="flex justify-between">
+                                                    <span style={{color: formColors.UOP26}}>UoP 26:</span>
+                                                    <span className="font-bold">{tooltip.data.UOP26.toFixed(1)}%</span>
+                                                </div>
+                                                <div className="text-gray-500 text-right">
+                                                    Podatek: {fmt(tooltip.data.taxUOP26)} | Netto: {fmt(tooltip.data.netUOP26)}
                                                 </div>
                                             </div>
                                         )}
