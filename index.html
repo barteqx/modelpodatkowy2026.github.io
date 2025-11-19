@@ -131,6 +131,23 @@
             const [activeTab, setActiveTab] = useState(getInitialTab);
             const [s, setS] = useState(getInitialSettings);
             const [darkMode, setDarkMode] = useState(getInitialDarkMode);
+            const [isScrolled, setIsScrolled] = useState(false);
+
+            // Śledzenie scrollu dla animacji tytułu
+            useEffect(() => {
+                let ticking = false;
+                const handleScroll = () => {
+                    if (!ticking) {
+                        window.requestAnimationFrame(() => {
+                            setIsScrolled(window.scrollY > 50);
+                            ticking = false;
+                        });
+                        ticking = true;
+                    }
+                };
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
 
             // Synchronizacja z URL hash
             useEffect(() => {
@@ -147,6 +164,7 @@
             const changeTab = (tabId) => {
                 setActiveTab(tabId);
                 window.location.hash = tabId;
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             };
 
             // Zapisywanie ustawień do localStorage
@@ -226,27 +244,22 @@
                 <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 transition-colors duration-300 pb-10 font-sans">
                     <div className="max-w-7xl mx-auto sm:px-4">
 
-                        <header className="bg-indigo-900 dark:bg-black text-white p-6 rounded-b-xl sm:rounded-xl mb-6 shadow-xl flex justify-between items-center sticky top-0 z-30">
-                            <div>
-                                <h1 className="text-xl md:text-3xl font-extrabold tracking-tight">Model Podatkowy 2026+</h1>
-                                <div className="flex items-center gap-2 text-indigo-200 text-xs md:text-sm mt-1">
-                                    <span className="bg-indigo-800 px-2 py-0.5 rounded">PKB: {s.pkbTril} bln</span>
-                                    <span className="bg-indigo-800 px-2 py-0.5 rounded">Płaca min: {s.minWage} zł</span>
-                                </div>
+                        <header className="bg-white/30 dark:bg-gray-800/30 backdrop-blur-md rounded-b-xl sm:rounded-xl mb-6 shadow-xl sticky top-0 z-40 border dark:border-gray-700">
+                            <div className={`rounded-t-xl flex justify-center items-center relative transition-all duration-300 ${isScrolled ? 'bg-transparent text-indigo-900 dark:text-white p-2 sm:p-3' : 'bg-indigo-900 dark:bg-black text-white p-4 sm:p-6'}`}>
+                                <h1 className={`font-extrabold tracking-tight transition-all duration-300 ${isScrolled ? 'text-lg md:text-xl' : 'text-xl md:text-3xl'}`}>Model Podatkowy 2026+</h1>
+                                <button onClick={() => setDarkMode(!darkMode)} className="absolute right-3 sm:right-4 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm font-medium">
+                                    {darkMode ? "Jasny" : "Ciemny"}
+                                </button>
                             </div>
-                            <button onClick={() => setDarkMode(!darkMode)} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-sm font-medium">
-                                {darkMode ? "Tryb jasny" : "Tryb ciemny"}
-                            </button>
+                            <nav className="flex flex-wrap justify-center overflow-hidden">
+                                <TabBtn id="info" label="Start / Założenia" shortLabel="Start" icon="home" />
+                                <TabBtn id="citizen" label="Obywatel" shortLabel="Obywa." icon="info" />
+                                <TabBtn id="company" label="Firma" shortLabel="Firma" icon="building-2" />
+                                <TabBtn id="charts" label="Wykresy" shortLabel="Wykr." icon="bar-chart-3" />
+                                <TabBtn id="budget" label="Budżet" shortLabel="Budż." icon="calculator" />
+                                <TabBtn id="settings" label="Ustawienia" shortLabel="Ustaw." icon="settings" />
+                            </nav>
                         </header>
-
-                        <nav className="flex flex-wrap justify-center bg-white dark:bg-gray-800 rounded-xl shadow-md mb-6 overflow-hidden border dark:border-gray-700 sticky top-24 z-20">
-                            <TabBtn id="info" label="Start / Założenia" shortLabel="Start" icon="home" />
-                            <TabBtn id="citizen" label="Obywatel" shortLabel="Obywa." icon="info" />
-                            <TabBtn id="company" label="Firma" shortLabel="Firma" icon="building-2" />
-                            <TabBtn id="charts" label="Wykresy" shortLabel="Wykr." icon="bar-chart-3" />
-                            <TabBtn id="budget" label="Budżet" shortLabel="Budż." icon="calculator" />
-                            <TabBtn id="settings" label="Ustawienia" shortLabel="Ustaw." icon="settings" />
-                        </nav>
 
                         <div className="animate-in">
                             {activeTab === 'info' && <InfoTab s={s} taxFree={budget.taxFree} changeTab={changeTab} />}
@@ -498,6 +511,7 @@
             const [rycRate, setRycRate] = useState(initialState?.rycRate ?? 0.15);
             const [costs, setCosts] = useState(initialState?.costs ?? 20000);
             const [isUnder26, setIsUnder26] = useState(initialState?.isUnder26 ?? false); // Zwolnienie do 26 r.ż.
+            const [kupPercent, setKupPercent] = useState(initialState?.kupPercent ?? -1); // KUP dla UoP (-1 = brak, 0 = standardowe 3000 zł)
             // Wydatki rozbite na kategorie VAT (miesięcznie, netto)
             const [vatExp5, setVatExp5] = useState(initialState?.vatExp5 ?? 1500);   // żywność, leki
             const [vatExp8, setVatExp8] = useState(initialState?.vatExp8 ?? 500);    // usługi, gastronomia
@@ -516,10 +530,10 @@
             useEffect(() => {
                 try {
                     localStorage.setItem('taxModelCitizen', JSON.stringify({
-                        gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, properties, assets
+                        gross, form, rycRate, costs, isUnder26, kupPercent, vatExp5, vatExp8, vatExp23, properties, assets
                     }));
                 } catch {}
-            }, [gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, properties, assets]);
+            }, [gross, form, rycRate, costs, isUnder26, kupPercent, vatExp5, vatExp8, vatExp23, properties, assets]);
 
             const addProperty = () => {
                 if (newPropName && newPropValue > 0) {
@@ -575,6 +589,8 @@
                 const netProp = baseProp - taxProp;
 
                 let netCurr = 0;
+                let taxCurr = 0;
+                let zusCurr = 0;
                 // Limit składek emerytalnych - 30-krotność przeciętnego wynagrodzenia (2024: ~234 720 zł)
                 const ZUS_LIMIT = 234720;
                 if(form === 'UOP') {
@@ -585,27 +601,44 @@
                     const base = gross - zus;
                     const nfz = base * C.NFZ;
 
+                    // KUP - koszty uzyskania przychodu (-1 = brak, 0 = standardowe 3000 zł, >0 = procent od base)
+                    // Limit dla 50% KUP: max od 120 000 zł podstawy rocznie (czyli max 60 000 zł KUP)
+                    let kup = 0;
+                    if (kupPercent === 0) {
+                        kup = 3000;
+                    } else if (kupPercent > 0) {
+                        const kupRaw = base * (kupPercent / 100);
+                        kup = kupPercent === 50 ? Math.min(kupRaw, 60000) : kupRaw;
+                    }
+
                     // Zwolnienie z PIT do 26 r.ż. (limit 85 528 zł)
                     let pit = 0;
                     if (isUnder26) {
                         const taxableBase = Math.max(0, base - 85528);
-                        const pitBase = Math.max(0, taxableBase - 3000);
+                        const pitBase = Math.max(0, taxableBase - kup);
                         pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
                     } else {
-                        const pitBase = Math.max(0, base - 3000);
+                        const pitBase = Math.max(0, base - kup);
                         pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
                     }
                     netCurr = gross - zus - nfz - Math.max(0, pit);
+                    taxCurr = Math.max(0, pit);
+                    zusCurr = zus + nfz;
                 } else if (form === 'LIN') {
-                    const base = Math.max(0, gross - costs - C.JDG_ZUS_RYCZALT);
+                    const zus = C.JDG_ZUS_RYCZALT;
+                    const base = Math.max(0, gross - costs - zus);
                     const nfz = base * 0.049;
                     const pit = Math.max(0, base - nfz) * 0.19;
-                    netCurr = gross - costs - C.JDG_ZUS_RYCZALT - nfz - pit;
+                    netCurr = gross - costs - zus - nfz - pit;
+                    taxCurr = pit;
+                    zusCurr = zus + nfz;
                 } else {
                     const zus = C.JDG_ZUS_RYCZALT;
                     const nfz = gross < 60000 ? 4800 : (gross < 300000 ? 8000 : 14000);
                     const pit = gross * rycRate;
                     netCurr = gross - costs - zus - nfz - pit;
+                    taxCurr = pit;
+                    zusCurr = zus + nfz;
                 }
 
                 // Obliczenie kosztów VAT - obecnie vs propozycja
@@ -620,13 +653,19 @@
                 const vatLoss = costNewTotal - costOldTotal;
                 const diffNet = netProp - netCurr;
 
+                // Efektywne stawki opodatkowania
+                const effRateProp = gross > 0 ? (taxProp / gross) * 100 : 0;
+                const effRateCurr = gross > 0 ? ((gross - netCurr) / gross) * 100 : 0;
+
                 return {
-                    netProp, taxProp, netCurr, diffNet, vatLoss,
+                    netProp, taxProp, netCurr, taxCurr, zusCurr, diffNet, vatLoss,
                     vatTotal,
                     costOldTotal,
-                    costNewTotal
+                    costNewTotal,
+                    effRateProp,
+                    effRateCurr
                 };
-            }, [gross, form, rycRate, costs, isUnder26, vatExp5, vatExp8, vatExp23, s, budget]);
+            }, [gross, form, rycRate, costs, isUnder26, kupPercent, vatExp5, vatExp8, vatExp23, s, budget]);
 
             // Całkowity bilans z uwzględnieniem podatku majątkowego
             const finalBalance = r.diffNet - r.vatLoss - wealthCalc.totalTax;
@@ -676,10 +715,21 @@
                             {form === 'RYC' && <div><label className={CLS.label}>Stawka</label><select value={rycRate} onChange={e=>setRycRate(Number(e.target.value))} className={CLS.select}><option value="0.02">2%</option><option value="0.03">3%</option><option value="0.055">5.5%</option><option value="0.085">8.5%</option><option value="0.10">10%</option><option value="0.12">12%</option><option value="0.14">14%</option><option value="0.15">15%</option><option value="0.17">17%</option></select></div>}
                             {form !== 'UOP' && <div className="col-span-2"><label className={CLS.label}>Koszty</label><input type="number" value={costs} onChange={e=>setCosts(Number(e.target.value))} className={CLS.input}/></div>}
                             {form === 'UOP' && (
-                                <div className="col-span-2 flex items-center gap-2">
-                                    <input type="checkbox" id="under26" checked={isUnder26} onChange={e=>setIsUnder26(e.target.checked)} className="accent-indigo-600 w-4 h-4" />
-                                    <label htmlFor="under26" className="text-sm dark:text-gray-300">Zwolnienie do 26 r.ż. (limit 85 528 zł)</label>
-                                </div>
+                                <>
+                                    <div>
+                                        <label className={CLS.label}>KUP %</label>
+                                        <select value={kupPercent} onChange={e=>setKupPercent(Number(e.target.value))} className={CLS.select}>
+                                            <option value="-1">Brak</option>
+                                            <option value="0">Standardowe (3000 zł)</option>
+                                            <option value="20">20% (prawa autorskie)</option>
+                                            <option value="50">50% (twórcy)</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input type="checkbox" id="under26" checked={isUnder26} onChange={e=>setIsUnder26(e.target.checked)} className="accent-indigo-600 w-4 h-4" />
+                                        <label htmlFor="under26" className="text-sm dark:text-gray-300">Do 26 r.ż.</label>
+                                    </div>
+                                </>
                             )}
                         </div>
 
@@ -688,10 +738,13 @@
                                 <div className="text-xs font-bold uppercase opacity-60">Nowy System</div>
                                 <div className={`text-2xl font-black ${CLS.accent}`}>{fmt(r.netProp)}</div>
                                 <div className="text-xs opacity-70">Podatek: {fmt(r.taxProp)}</div>
+                                <div className={`text-sm font-bold mt-1 ${CLS.accent}`}>Efektywnie: {r.effRateProp.toFixed(1)}%</div>
                             </div>
                             <div className="p-4 rounded border bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600">
                                 <div className="text-xs font-bold uppercase opacity-60">Obecnie</div>
                                 <div className="text-xl font-bold dark:text-gray-200">{fmt(r.netCurr)}</div>
+                                <div className="text-xs opacity-70">Podatek: {fmt(r.taxCurr)} | Składki: {fmt(r.zusCurr)}</div>
+                                <div className="text-sm font-bold mt-1 text-gray-600 dark:text-gray-400">Efektywnie: {r.effRateCurr.toFixed(1)}%</div>
                             </div>
                         </div>
                         <div className={`mt-4 text-center p-3 rounded font-bold text-lg ${r.diffNet >= 0 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
@@ -1029,7 +1082,9 @@
             const [selectedForms, setSelectedForms] = useState(['UOP', 'UOP26', 'LIN', 'RYC', 'PROP']);
             const [rycRate, setRycRate] = useState(0.15);
             const [jdgCosts, setJdgCosts] = useState(0); // Koszty uzyskania przychodu dla JDG
+            const [kupPercent, setKupPercent] = useState(-1); // KUP dla UoP (-1 = brak, 0 = standardowe 3000 zł)
             const [tooltip, setTooltip] = useState(null); // {x, y, data}
+            const [lastPoint, setLastPoint] = useState(null); // Zapamiętuje ostatni najechany punkt
 
             const toggleForm = (form) => {
                 setSelectedForms(prev =>
@@ -1059,14 +1114,24 @@
                     const zus = zusEmRent + zusChorobowa;
                     const base = gross - zus;
                     const nfz = base * C.NFZ;
-                    const pitBase = Math.max(0, base - 3000);
+
+                    // KUP - koszty uzyskania przychodu (-1 = brak, 0 = 3000 zł, >0 = procent)
+                    let kup = 0;
+                    if (kupPercent === 0) {
+                        kup = 3000;
+                    } else if (kupPercent > 0) {
+                        const kupRaw = base * (kupPercent / 100);
+                        kup = kupPercent === 50 ? Math.min(kupRaw, 60000) : kupRaw;
+                    }
+
+                    const pitBase = Math.max(0, base - kup);
                     const pit = (pitBase <= C.PIT_THRESH) ? (pitBase * C.PIT_R1 - 3600) : (10800 + (pitBase - C.PIT_THRESH) * C.PIT_R2);
                     const netUOP = gross - zus - nfz - Math.max(0, pit);
                     const effRateUOP = ((gross - netUOP) / gross) * 100;
 
                     // UOP do 26 r.ż. - zwolnienie z PIT do 85 528 zł
                     const taxableBase26 = Math.max(0, base - 85528);
-                    const pitBase26 = Math.max(0, taxableBase26 - 3000);
+                    const pitBase26 = Math.max(0, taxableBase26 - kup);
                     const pit26 = (pitBase26 <= C.PIT_THRESH) ? (pitBase26 * C.PIT_R1 - 3600) : (10800 + (pitBase26 - C.PIT_THRESH) * C.PIT_R2);
                     const netUOP26 = gross - zus - nfz - Math.max(0, pit26);
                     const effRateUOP26 = ((gross - netUOP26) / gross) * 100;
@@ -1104,7 +1169,7 @@
                     });
                 }
                 return points;
-            }, [s, budget, rycRate, jdgCosts]);
+            }, [s, budget, rycRate, jdgCosts, kupPercent]);
 
             // Rysowanie wykresu SVG
             const chartWidth = 800;
@@ -1142,21 +1207,21 @@
 
                 if (closest && gross >= 0 && gross <= maxGross) {
                     setTooltip({ x, y, data: closest });
-                } else {
-                    setTooltip(null);
+                    setLastPoint(closest);
                 }
             };
 
             const handleMouseLeave = () => {
                 setTooltip(null);
+                // Nie resetujemy lastPoint - zachowujemy ostatni najechany punkt
             };
 
             const formColors = {
                 UOP: '#9ca3af',
-                UOP26: '#22c55e',
+                UOP26: '#f97316',
                 LIN: '#60a5fa',
                 RYC: '#fbbf24',
-                PROP: '#6366f1'
+                PROP: '#22c55e'
             };
 
             const formLabels = {
@@ -1216,6 +1281,19 @@
                                     min="0"
                                     step="1000"
                                 />
+                            </div>
+                            <div className="flex items-center gap-1 ml-2">
+                                <label className="text-xs text-gray-500">KUP UoP:</label>
+                                <select
+                                    value={kupPercent}
+                                    onChange={e => setKupPercent(Number(e.target.value))}
+                                    className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                                >
+                                    <option value="-1">Brak</option>
+                                    <option value="0">3000 zł</option>
+                                    <option value="20">20%</option>
+                                    <option value="50">50%</option>
+                                </select>
                             </div>
                         </div>
 
@@ -1281,90 +1359,52 @@
                                 </g>
                             </svg>
 
-                            {/* Tooltip */}
-                            {tooltip && (
-                                <div
-                                    className="absolute bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-3 text-xs pointer-events-none z-10"
-                                    style={{
-                                        left: Math.min(tooltip.x + 10, 300),
-                                        top: Math.max(tooltip.y - 80, 10),
-                                        minWidth: '180px'
-                                    }}
-                                >
-                                    <div className="font-bold text-sm mb-2 border-b pb-1 dark:border-gray-600">
-                                        {fmt(tooltip.data.gross)} przychodu
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        {selectedForms.includes('UOP') && (
-                                            <div>
-                                                <div className="flex justify-between">
-                                                    <span style={{color: formColors.UOP}}>UoP:</span>
-                                                    <span className="font-bold">{tooltip.data.UOP.toFixed(1)}%</span>
-                                                </div>
-                                                <div className="text-gray-500 text-right">
-                                                    Podatek: {fmt(tooltip.data.taxUOP)} | Netto: {fmt(tooltip.data.netUOP)}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {selectedForms.includes('UOP26') && (
-                                            <div>
-                                                <div className="flex justify-between">
-                                                    <span style={{color: formColors.UOP26}}>UoP 26:</span>
-                                                    <span className="font-bold">{tooltip.data.UOP26.toFixed(1)}%</span>
-                                                </div>
-                                                <div className="text-gray-500 text-right">
-                                                    Podatek: {fmt(tooltip.data.taxUOP26)} | Netto: {fmt(tooltip.data.netUOP26)}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {selectedForms.includes('LIN') && (
-                                            <div>
-                                                <div className="flex justify-between">
-                                                    <span style={{color: formColors.LIN}}>Liniowy:</span>
-                                                    <span className="font-bold">{tooltip.data.LIN.toFixed(1)}%</span>
-                                                </div>
-                                                <div className="text-gray-500 text-right">
-                                                    Podatek: {fmt(tooltip.data.taxLin)} | Netto: {fmt(tooltip.data.netLin)}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {selectedForms.includes('RYC') && (
-                                            <div>
-                                                <div className="flex justify-between">
-                                                    <span style={{color: formColors.RYC}}>Ryczałt:</span>
-                                                    <span className="font-bold">{tooltip.data.RYC.toFixed(1)}%</span>
-                                                </div>
-                                                <div className="text-gray-500 text-right">
-                                                    Podatek: {fmt(tooltip.data.taxRyc)} | Netto: {fmt(tooltip.data.netRyc)}
-                                                </div>
-                                            </div>
-                                        )}
-                                        {selectedForms.includes('PROP') && (
-                                            <div>
-                                                <div className="flex justify-between">
-                                                    <span style={{color: formColors.PROP}}>Propozycja:</span>
-                                                    <span className="font-bold">{tooltip.data.PROP.toFixed(1)}%</span>
-                                                </div>
-                                                <div className="text-gray-500 text-right">
-                                                    Podatek: {fmt(tooltip.data.taxProp)} | Netto: {fmt(tooltip.data.netProp)}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
                         </div>
 
-                        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            {selectedForms.map(form => {
-                                const lastPoint = chartData[chartData.length - 1];
+                        {/* Dynamiczne opisy pod wykresem */}
+                        <div className="mt-4">
+                            <div className="text-center mb-3">
+                                <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                                    {fmt((tooltip ? tooltip.data : lastPoint || chartData[chartData.length - 1]).gross)} przychodu
+                                </span>
+                            </div>
+                            {/* Propozycja - wyróżniona na całą szerokość */}
+                            {selectedForms.includes('PROP') && (() => {
+                                const point = tooltip ? tooltip.data : lastPoint || chartData[chartData.length - 1];
                                 return (
-                                    <div key={form} className="text-center p-2 rounded" style={{backgroundColor: `${formColors[form]}20`}}>
-                                        <div className="font-bold" style={{color: formColors[form]}}>{formLabels[form]}</div>
-                                        <div className="text-xs text-gray-500">przy 1M: {lastPoint[form].toFixed(1)}%</div>
+                                    <div className="p-4 rounded-lg border-2 mb-4" style={{borderColor: formColors.PROP, backgroundColor: `${formColors.PROP}15`}}>
+                                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                                            <div className="font-bold text-sm" style={{color: formColors.PROP}}>{formLabels.PROP}</div>
+                                            <div className="flex items-center gap-6">
+                                                <div className="text-3xl font-black" style={{color: formColors.PROP}}>{point.PROP.toFixed(1)}%</div>
+                                                <div className="text-sm text-gray-600 dark:text-gray-400">
+                                                    <span>Netto: <strong>{fmt(point.netProp)}</strong></span>
+                                                    <span className="ml-4">Podatek: <strong>{fmt(point.taxProp)}</strong></span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 );
-                            })}
+                            })()}
+
+                            {/* Pozostałe formy */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                {selectedForms.filter(f => f !== 'PROP').map(form => {
+                                    const point = tooltip ? tooltip.data : lastPoint || chartData[chartData.length - 1];
+                                    const netKey = form === 'UOP' ? 'netUOP' : form === 'UOP26' ? 'netUOP26' : form === 'LIN' ? 'netLin' : 'netRyc';
+                                    const taxKey = form === 'UOP' ? 'taxUOP' : form === 'UOP26' ? 'taxUOP26' : form === 'LIN' ? 'taxLin' : 'taxRyc';
+                                    return (
+                                        <div key={form} className="p-3 rounded border" style={{borderColor: formColors[form], backgroundColor: `${formColors[form]}10`}}>
+                                            <div className="font-bold text-xs mb-1" style={{color: formColors[form]}}>{formLabels[form]}</div>
+                                            <div className="text-lg font-black" style={{color: formColors[form]}}>{point[form].toFixed(1)}%</div>
+                                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                <div>Netto: {fmt(point[netKey])}</div>
+                                                <div>Podatek: {fmt(point[taxKey])}</div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     </div>
                 </div>
